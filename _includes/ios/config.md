@@ -1,102 +1,68 @@
 # Config
 
-## Parse Config
+## PFConfig
 
-`PFConfig` is a way to configure your applications remotely by storing a single configuration object on Parse. It enables you to add things like feature gating or a simple "Message of the Day". To start using `PFConfig` you need to add a few key/value pairs (parameters) to your app on the Parse Config Dashboard.
+`PFConfig` is a way to store public values for the purpose of dynamically setting and configuring values on your applications remotely by storing a single configuration object on Parse. Its potential is limitless. How about "Message of The Day", or perhapse use it for A-B testing values. Maybe use it to store images or color values to update your apps logo, artwork, or colorscheme anytime without a push to the app store. The possiblities are endless.
 
 <img alt="Configuration Editor" data-echo="{{ '/assets/images/config_editor.png' | prepend: site.baseurl }}"/>
 
-After that you will be able to fetch the `PFConfig` on the client, like in this example:
-
-<div class="language-toggle" markdown="1">
-```objective_c
-[PFConfig getConfigInBackgroundWithBlock:^(PFConfig *config, NSError *error) {
-  NSNumber *number = config[@"winningNumber"];
-  NSLog(@"Yay! The number is %@!", [number stringValue]);
-}];
-```
-```swift
-PFConfig.getConfigInBackgroundWithBlock {
-  (config: PFConfig?, error: NSError?) -> Void in
-  let number = config?["winningNumber"] as? Int
-  print("Yay! The number is \(number)!")
-}
-```
-</div>
-
 ## Retrieving Config
 
-`PFConfig` is built to be as robust and reliable as possible, even in the face of poor internet connections. Caching is used by default to ensure that the latest successfully fetched config is always available. In the below example we use `getConfigInBackgroundWithBlock` to retrieve the latest version of config from the server, and if the fetch fails we can simply fall back to the version that we successfully fetched before via `currentConfig`.
+`PFConfig` is built to be as robust and reliable as possible, even in the face of poor internet connections. Caching is used by default to ensure that the latest successfully fetched config is always available. In the below example we use `getInBackground` to retrieve the latest version of config from the server which you can use with a completion block as demonstrated below.
 
 <div class="language-toggle" markdown="1">
 ```objective_c
-NSLog(@"Getting the latest config...");
-[PFConfig getConfigInBackgroundWithBlock:^(PFConfig *config, NSError *error) {
-  if (!error) {
-    NSLog(@"Yay! Config was fetched from the server.");
+[PFConfig getConfigInBackgroundWithBlock:^(PFConfig * _Nullable config, NSError * _Nullable error) {
+  if (config) {
+    NSString *messageOTD = config[@"messageOTD"];
+    NSLog(@"Message Of The Day: %@", messageOTD);
   } else {
-    NSLog(@"Failed to fetch. Using Cached Config.");
-    config = [PFConfig currentConfig];
+    // FAIL Fall back to currentConfig
   }
-
-  NSString *welcomeMessage = config[@"welcomeMessage"];
-  if (!welcomeMessage) {
-    NSLog(@"Falling back to default message.");
-    welcomeMessage = @"Welcome!";
-  }
-  NSLog(@"Welcome Messsage = %@", welcomeMessage);
 }];
 ```
 ```swift
-print("Getting the latest config...");
-PFConfig.getConfigInBackgroundWithBlock {
-  (var config: PFConfig?, error: NSError?) -> Void in
-  if error == nil {
-    print("Yay! Config was fetched from the server.")
+PFConfig.getInBackground { (config, error) in
+  if let messageOTD = config?["messageOTD"] {
+    print("Message Of The Day: ", messageOTD)
   } else {
-    print("Failed to fetch. Using Cached Config.")
-    config = PFConfig.currentConfig()
+    // FAIL Fall back to currentConfig
   }
-
-  var welcomeMessage: NSString? = config?["welcomeMessage"] as? NSString
-  if let welcomeMessage = welcomeMessage {
-    print("Welcome Message = \(welcomeMessage)!")
-  } else {
-    print("Falling back to default message.")
-    welcomeMessage = "Welcome!";
-  }
-};
+}
 ```
 </div>
 
 ## Current Config
 
-Every `PFConfig` instance that you get is always immutable. When you retrieve a new `PFConfig` in the future from the network, it will not modify any existing `PFConfig` instance, but will instead create a new one and make it available via `[PFConfig currentConfig]`. Therefore, you can safely pass around any `PFConfig` object and safely assume that it will not automatically change.
-
-It might be troublesome to retrieve the config from the server every time you want to use it. You can avoid this by simply using the cached `currentConfig` object and fetching the config only once in a while.
+`PFConfig` is automatically locally stored after fetching it. In the event network issues arrise you may always fall back to that stored version by calling the `current` function. Its worth noting that a new immutable instance of the latest configuration file is created each time its called. This way fetching an  will not cause conflicts if another instance is passed around. To encapsulate the retrieval of the stored version use `getCurrentConfigInBackground`.
 
 <div class="language-toggle" markdown="1">
 ```objective_c
-// Fetches the config at most once every 12 hours per app runtime
-const NSTimeInterval configRefreshInterval = 12.0 * 60.0 * 60.0;
-static NSDate *lastFetchedDate;
-if (lastFetchedDate == nil ||
-    [lastFetchedDate timeIntervalSinceNow] * -1.0 > configRefreshInterval) {
-  [PFConfig getConfigInBackgroundWithBlock:nil];
-  lastFetchedDate = [NSDate date];
+double maxDifference = 12.0 * 60.0 * 60.0; // 12 hours per app config fetch
+NSTimeInterval lastChecked = [[NSUserDefaults standardUserDefaults] doubleForKey:@"lastConfigFetch"];
+NSTimeInterval currentInterval = [[NSDate new] timeIntervalSince1970];
+
+// If it's been 12 hours since we last checked, get the config over network in background
+if ((currentInterval - lastChecked) >= maxDifference) {
+  PFConfig *config = [PFConfig getConfigInBackground];
+  [[NSUserDefaults standardUserDefaults] setDouble:currentInterval forKey:"lastConfigFetch"];
+  [[NSUserDefaults standardUserDefaults] synchronize];
+} else {
+  PFConfig *config = [PFConfig currentConfig];
 }
 ```
 ```swift
-// Fetches the config at most once every 12 hours per app runtime
-let configRefreshInterval: NSTimeInterval  = 12.0 * 60.0 * 60.0
-struct DateSingleton {
-    static var lastFetchedDate: NSDate? = nil
-}
-let date: NSDate? = DateSingleton.lastFetchedDate;
-if date == nil ||
-   date!.timeIntervalSinceNow * -1.0 > configRefreshInterval {
-  PFConfig.getConfigInBackgroundWithBlock(nil);
-  DateSingleton.lastFetchedDate = NSDate();
+let maxDifference:Double = 12 * 60 * 60 // 12 hours 
+let lastInterval = UserDefaults.standard.double(forKey: "lastConfigFetch")
+let currentInterval = NSDate().timeIntervalSince1970
+
+// If it's been 12 hours since we last checked, get the config over network in background
+if (currentInterval - lastInterval) >= maxDifference {
+  let config = PFConfig.getInBackground()
+  UserDefaults.standard.set(currentInterval, forKey: "lastConfigFetch")
+  UserDefaults.standard.synchronize()
+} else {
+  let config = PFConfig.current()
 }
 ```
 </div>
